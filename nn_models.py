@@ -136,63 +136,64 @@ def u_net(input_shape=(200,300,1)):
     return Model(input_img, conv10), saving_file
 
 
-def u_net_v2(input_shape=(200,300,1), norm=True):
+def u_net_v2(input_shape=(200,300,1), norm=True, simple=False):
     # %%
     saving_file = "u-net_v2_*{val_dice_coef:.4f}*_" + str(input_shape)
     if norm: saving_file += '_norm'
+    if simple: saving_file += '_simpl'
     saving_file += '.h5'
 
     input_img = Input(input_shape)
     
     conv1 = Conv2D(16, (3, 3), activation='relu', padding='same')(input_img)
-    conv1 = Conv2D(16, (3, 3), activation='relu', padding='same')(conv1)
+    if not simple: conv1 = Conv2D(16, (3, 3), activation='relu', padding='same')(conv1)
     if norm: conv1 = BatchNormalization()(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
 
     conv2 = Conv2D(32, (3, 3), activation='relu', padding='same')(pool1)
-    conv2 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv2)
+    if not simple: conv2 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv2)
     if norm: conv2 = BatchNormalization()(conv2)
     pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
 
     conv3 = Conv2D(64, (3, 3), activation='relu', padding='same')(pool2)
-    conv3 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv3)
+    if not simple: conv3 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv3)
     if norm: conv3 = BatchNormalization()(conv3)
     pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
 
     conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool3)
-    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv4)
+    if not simple: conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv4)
     if norm: conv4 = BatchNormalization()(conv4)
     pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
 
     conv5 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool4)
-    conv5 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv5)
+    if not simple: conv5 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv5)
 #    
 #    print Model(input_img, conv3).summary()
 ##    print Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='same')(conv5)
 #
     up6 = concatenate([Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='same')(conv5), conv4], axis=3)
     conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(up6)
-    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv6)
+    if not simple: conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv6)
     if norm: conv6 = BatchNormalization()(conv6)
 
     up7 = concatenate([Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(conv6), conv3], axis=3)
     conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(up7)
-    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv7)
+    if not simple: conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv7)
     if norm: conv7 = BatchNormalization()(conv7)
 
     up8 = concatenate([Conv2DTranspose(32, (2, 2), strides=(2, 2), padding='same')(conv7), conv2], axis=3)
     conv8 = Conv2D(32, (3, 3), activation='relu', padding='same')(up8)
-    conv8 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv8)
+    if not simple: conv8 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv8)
     if norm: conv8 = BatchNormalization()(conv8)
 
     up9 = concatenate([Conv2DTranspose(16, (2, 2), strides=(2, 2), padding='same')(conv8), conv1], axis=3)
     conv9 = Conv2D(16, (3, 3), activation='relu', padding='same')(up9)
-    conv9 = Conv2D(16, (3, 3), activation='relu', padding='same')(conv9)
+    if not simple: conv9 = Conv2D(16, (3, 3), activation='relu', padding='same')(conv9)
     if norm: conv9 = BatchNormalization()(conv9)
 
     conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
     
-#    print Model(input_img, conv10).summary()
+    print Model(input_img, conv10).summary()
      # %%
 
     return Model(input_img, conv10), saving_file

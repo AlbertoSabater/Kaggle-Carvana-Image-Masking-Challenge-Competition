@@ -131,13 +131,22 @@ def removeWorstModels(model_dir, rename_dir=True):
     return best_name, best_loss, new_model_dir
 
 
-def storeTrainStatistics(model_dir, train_car_mask, train_preds, val_car_mask, val_preds, base_score, prefix=''):
+def storeTrainStatistics(model_dir, train_car_mask, train_preds, val_car_mask, val_preds, base_score, training_time, prefix=''):
     with open(model_dir + 'results.txt', 'a+') as f:    # a+
         f.write(prefix+'base_score: ' + str(base_score) + '\n')
         f.write(prefix+'train_acc: ' + str(metrics.accuracy_score(train_car_mask.ravel(), train_preds.ravel())) +'\n')
         f.write(prefix+'val_acc: ' + str(metrics.accuracy_score(val_car_mask.ravel(), val_preds.ravel())) +'\n')
         f.write(prefix+'train_dice: ' + str(diceCoefficient(train_preds, train_car_mask)) +'\n')
         f.write(prefix+'val_dice: ' + str(diceCoefficient(val_preds, val_car_mask)) +'\n')
+        f.write('training_time: ' + str(training_time) +'\n')
+    f.close()
+    
+def storeTrainStatistics_augm(model_dir, val_car_mask, val_preds, base_score, training_time, prefix=''):
+    with open(model_dir + 'results.txt', 'a+') as f:    # a+
+        f.write(prefix+'base_score: ' + str(base_score) + '\n')
+        f.write(prefix+'val_acc: ' + str(metrics.accuracy_score(val_car_mask.ravel(), val_preds.ravel())) +'\n')
+        f.write(prefix+'val_dice: ' + str(diceCoefficient(val_preds, val_car_mask)) +'\n')
+        f.write('training_time: ' + str(training_time) +'\n')
     f.close()
     
     
@@ -149,6 +158,7 @@ def upsampleArray(arr, arr_shappe):
 
 # %%
 
+# Store two numpy arrays with images and masks
 def preprocessData(img_size):
 # %%
     t = time.time()
@@ -175,7 +185,8 @@ def preprocessData(img_size):
     print "Time elapsed:",  (time.time()-t)/60
     
 
-
+# DEPRECATED
+# Stores the training numpy arrays splited in several files
 def preprocessData_v2(img_size):
 # %%
     t = time.time()
@@ -219,6 +230,8 @@ def preprocessData_v2(img_size):
     
     
 # %%
+        
+# Preprocess images and mask and stores each image/mask in a folder, different for image/mask and train/val/test
 def preprocessData_v3(img_size):
 # %%
     filelist = glob.glob('data/train/*')
@@ -260,10 +273,15 @@ def preprocessData_v3(img_size):
     
     # Get test data
     t = time.time()
+    print "Processing Test..."
     filelist = glob.glob('data/test/*')
     store_dir = 'data/test_'+str(img_size)+'/data/'
     if not os.path.exists(store_dir): os.makedirs(store_dir)
-    Parallel(n_jobs=8)(delayed(processImageBN)(fname, store_dir, 'data/test/') for fname in filelist)
+    step = len(filelist)/10
+    for i in np.arange(0,len(filelist), step):
+        st = time.time()
+        Parallel(n_jobs=8)(delayed(processImageBN)(fname, store_dir, 'data/test/') for fname in filelist[i:i+step])
+        print i,'/', 10, '\t', time.strftime("%H:%M:%S"), '-', (time.time()-st)
     print "Test. Time elapsed:",  (time.time()-t)/60
    
         

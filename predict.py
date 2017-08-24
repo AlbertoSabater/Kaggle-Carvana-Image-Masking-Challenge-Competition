@@ -23,7 +23,6 @@ from keras import backend as K
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
 
-input_shape = (200,300, 1)
 base_score = 0.5
 
 
@@ -33,13 +32,23 @@ def rle(img, base_score):
     
     img = nn_utils.upsampleArray(img, shape)
     
+#    flat_img = img.flatten()
+#    flat_img = np.where(flat_img > base_score, 1, 0).astype(np.uint8)
+#
+#    starts = np.array((flat_img[:-1] == 0) & (flat_img[1:] == 1))
+#    ends = np.array((flat_img[:-1] == 1) & (flat_img[1:] == 0))
+#    starts_ix = np.where(starts)[0] + 2
+#    ends_ix = np.where(ends)[0] + 2
+#    lengths = ends_ix - starts_ix
+    
     flat_img = img.flatten()
-    flat_img = np.where(flat_img > base_score, 1, 0).astype(np.uint8)
+    flat_img = np.where(flat_img > 0.5, 1, 0).astype(np.uint8)
+    flat_img = np.insert(flat_img, [0, len(flat_img)], [0, 0])
 
     starts = np.array((flat_img[:-1] == 0) & (flat_img[1:] == 1))
     ends = np.array((flat_img[:-1] == 1) & (flat_img[1:] == 0))
-    starts_ix = np.where(starts)[0] + 2
-    ends_ix = np.where(ends)[0] + 2
+    starts_ix = np.where(starts)[0] + 1
+    ends_ix = np.where(ends)[0] + 1
     lengths = ends_ix - starts_ix
     
     return ' '.join([ str(s)+' '+str(l) for s, l in zip(starts_ix, lengths) ])
@@ -68,7 +77,9 @@ def readBaseScore(model_dir):
 #model.load_weights(model_dir)
 
 
-num_model = 'model_4'
+model_number = 7
+
+num_model = 'model_' + str(model_number)
 files = os.listdir('models/')
 model_dir = 'models/' + [f for f in files if f.startswith(num_model)][0] + '/'
 from keras.models import model_from_json
@@ -119,13 +130,15 @@ f.write('img,rle_mask\n')
 step = 2500
 for i in np.arange(0, len(filelist), step):
     
+    st = time.time()
+    
     rles = Parallel(n_jobs=8)(delayed(rle)(
             model.predict(np.array(Image.open(fname)).reshape(1,shape[0],shape[1],1).astype(float)/255), 
                                base_score) for fname in filelist[i:i+step])
     
     [ f.write(fname.split('/')[3][:-4]+'.jpg' + ',' + res + '\n') for fname, res in zip(filelist[i:i+step], rles) ]
     
-    print i+step, '\t', time.strftime("%H:%M:%S")
+    print i+step, '\t', time.strftime("%H:%M:%S"), '-', (time.time()-st)
     
 f.close()
 
@@ -144,9 +157,9 @@ with open(model_dir+model_name+'_submission.csv', 'rb') as f_in, gzip.open(model
     
 # %%
     
-#import os
-#import time
-#print "Shuting down..."
-#time.sleep(60*75)
-#os.system('systemctl poweroff') 
+import os
+import time
+print "Shuting down..."
+time.sleep(60*60*15)
+os.system('systemctl suspend') 
 

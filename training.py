@@ -107,6 +107,7 @@ batch_size = 16
 
 checkpoint = ModelCheckpoint(model_dir + saving_file, monitor='val_dice_coef', verbose=1, save_best_only=True, mode='max')
 
+t = time.time()
 model.fit(train_car, train_car_mask,
                 epochs = 500,
                 batch_size = batch_size,
@@ -114,6 +115,7 @@ model.fit(train_car, train_car_mask,
                 validation_data = (val_car, val_car_mask),
                 callbacks = [earlyStopping, checkpoint],
                 verbose = 2)
+training_time = (time.time()-t)/60
 
 
 # %%
@@ -153,7 +155,7 @@ for prefix in ['']:     # , 'ups_' -> not RAM enogh to work
     val_preds = val_preds.astype(float)
     val_car_mask = val_car_mask.astype(float)
 
-    nn_utils.storeTrainStatistics(model_dir, train_car_mask, train_preds, val_car_mask, val_preds, base_score, prefix=prefix)
+    nn_utils.storeTrainStatistics(model_dir, train_car_mask, train_preds, val_car_mask, val_preds, base_score, training_time, prefix=prefix)
     
     print " - Statistics stored"
 
