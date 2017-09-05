@@ -14,6 +14,7 @@ from PIL import Image
 from joblib import Parallel, delayed
 import multiprocessing
 import itertools
+import re
 
 from keras import backend as K
 from keras.callbacks import EarlyStopping, ModelCheckpoint
@@ -24,27 +25,129 @@ np.random.seed(123)  # for reproducibility
 
 BASE_DIR = 'models/'
 
-earlyStopping = EarlyStopping(monitor='val_dice_coef', min_delta=0.00001, verbose=1, mode='max', patience=9)
 
 shape, batch_size = (256,256), 16
 shape, batch_size = (512,512), 4
-shape = (512+256,512+256)
+shape, batch_size = (512+256,512+256), 2
 shape = (1024,1024)
 
-shape, batch_size = (256,256), 16
+shape, batch_size = (512+256,512+256), 2
 
 base_score = 0.5
-simple = True
+augmentation = True
+simple = False
+load_validation_data = False
 
+RGB = True
+rgb_suffix = '_RGB' if RGB else ''
+color_mode = 'rgb' if RGB else 'grayscale'
+num_channels = 3 if RGB else 1
+
+loss = 'bcedice'        # 'bce'
+monitor = 'val_dice_coef'
+
+resume_training, model_to_resume = True, 13
+
+
+t = time.time()
 
 # -- 1. Entrenar 256x256 con image augmentation
-# 1.1. Entrenar sin dobles convolucionales
-# 2. Entrenar 512x512 sin image augmentation
-# 3. Entrenar 512x512 con image augmentation
+# -- 1.1. Entrenar sin dobles convolucionales
+# -- 1.2. Entrenar sin dobles convolucionales y sin flip_horizontal -> Mejora respecto de con Flip horizontal | 243 s
+# -- 2.1. Entrenar 512x512 sin image augmentation | 1280s
+# -- 2.2. Entrenar 512x512 con image augmentation (sin horizontal_flip)
+# -- 3.1. Loss -> binary + dice. Entrenar 512x512 con image augmentation (con horizontal_flip)
+# -- 4.1 756x756 + augmenting + flip_horizontal + bcedice  | 2800
+# 4.2 756X756. RGB. Augmented, flip_horizontal, bcedice     | 3000
+# Entrenar con train+validation
+# 3.2. Loss -> dice
 # 4. Probar cuál es el input más grande posible
 # 5. Optimizar el image augmentation
 # 6. Input en RGB
+# 6. Ver que algoritmo de entrenamiento funciona mejor Adam vs. RMSProp
 # 6. Optimizar learning rate
+# Upsample prediction in NN and test with full image
+
+# Implementar u-net con los pares de convs como dense blocks: https://github.com/tdeboissiere/DeepLearningImplementations/blob/master/DenseNet/densenet.py
+# https://medium.com/towards-data-science/densenet-2810936aeebb
+# -- Submit con Base_score = 0.5
+
+
+
+# %%
+# =============================================================================
+# Create NN model
+# =============================================================================
+
+
+# Create new model
+if not resume_training:
+    print ' * Creating new model'
+    input_shape = (shape[0], shape[1], num_channels)
+    
+    model, saving_file = nn_models.u_net_v2(input_shape=input_shape, loss=loss, norm=True, simple=simple, monitor=monitor)
+    
+    if loss=='bcedice': loss_metric = nn_utils.bce_dice_loss
+    elif loss=='bce': loss_metric = 'binary_crossentropy'
+    
+    model.compile(optimizer='adam', 
+                        loss=loss_metric,     # dice_coef_loss / mse / binary_crossentropy / nn_utils.bce_dice_loss
+                        metrics=[nn_utils.dice_coef])   # binary_accuracy
+    
+    print model.summary()
+    
+    model_dir = nn_utils.createModelDir()
+    with open(model_dir + "architecture.json", "w") as json_file:
+        json_file.write(model.to_json())
+        
+    saving_file = saving_file.replace(')_', ')_'+str(batch_size)+'_')
+    if augmentation: saving_file = saving_file.replace('.h5', '_augm.h5')
+    else: saving_file = saving_file.replace('.h5', '_noaugm.h5')
+    if RGB: saving_file = saving_file.replace('.h5', '_RGB.h5')
+    
+    print ' - Saving file:', saving_file
+
+# Load trained model
+else:
+    print ' * Loading trained model'
+    
+    num_model = 'model_' + str(model_to_resume)
+    files = os.listdir('models/')
+    model_dir = 'models/' + [f for f in files if f.startswith(num_model)][0] + '/'
+    from keras.models import model_from_json
+    json_file = open(model_dir+'architecture.json', 'r')
+    loaded_model_json = json_file.read()
+    json_file.close()
+    model = model_from_json(loaded_model_json)
+    model.load_weights(model_dir+[f for f in os.listdir(model_dir) if f[-3:]=='.h5'][0])
+    model_name = [f for f in os.listdir(model_dir) if f[-3:]=='.h5'][0][:-3]
+    
+    if '_bcedice' in model_name: loss_metric = nn_utils.bce_dice_loss
+    elif '_bce' in model_name: loss_metric = 'binary_crossentropy'
+    
+    if '_RGB' in model_name:
+        RGB = True
+        rgb_suffix = '_RGB' if RGB else ''
+        color_mode = 'rgb' if RGB else 'grayscale'
+        num_channels = 3 if RGB else 1
+
+    
+    initial_epoch = int(re.match(r'.*_e([0-9]+).*', model_name).group(1))
+    
+    model_name = re.sub(r'_e[0-9]+', '_e{epoch:02d}', model_name)
+    model_name = re.sub(r'_\*[\.0-9]+\*', '_*{'+monitor+':.4f}*', model_name)
+    
+    
+    model.compile(optimizer='adam', 
+                        loss=loss_metric,     # dice_coef_loss / mse / binary_crossentropy / nn_utils.bce_dice_loss
+                        metrics=[nn_utils.dice_coef])   # binary_accuracy
+    
+    
+    saving_file = model_name
+
+    print model.summary()
+    print saving_file
+
 
 
 # %%
@@ -52,45 +155,57 @@ simple = True
 # Load validation data
 # =============================================================================
 
-t = time.time()
-filelist = glob.glob('data/val_'+str(shape)+'/data/*')
-#filelist = filelist[:20]
-def loadValidationData(fname, img_size):
-#    print fname
-    fname = fname.split('/')[3]
-    return [np.array(Image.open('data/val_'+str(shape)+'/data/'+fname)).astype(float)/255,
-     np.array(Image.open('data/val_mask_'+str(shape)+'/data/'+fname)).astype(float)]
-
-pairs = np.array(Parallel(n_jobs=8)(delayed(loadValidationData)(fname, shape) for fname in filelist))
-val_car = pairs[:,0,:,:]
-val_car_mask = pairs[:,1,:,:]
-val_car = val_car.reshape(val_car.shape[0], shape[0], shape[1], 1)
-val_car_mask = val_car_mask.reshape(val_car.shape[0], shape[0], shape[1], 1)
-del pairs
-
-print "Time elapsed:",  (time.time()-t)/60
-
-
-# %%
-# =============================================================================
-# Create the model
-# =============================================================================
-
-input_shape = (shape[0], shape[1], 1)
-
-model, saving_file = nn_models.u_net_v2(input_shape=input_shape, norm=True, simple=simple)
-
-model.compile(optimizer='adam', 
-                    loss='binary_crossentropy',     # dice_coef_loss / mse / binary_crossentropy
-                    metrics=[nn_utils.dice_coef])   # binary_accuracy
-
-print model.summary()
-
-model_dir = nn_utils.createModelDir()
-with open(model_dir + "architecture.json", "w") as json_file:
-    json_file.write(model.to_json())
+if load_validation_data:
+    print 'Loading validation data'
     
-saving_file = saving_file.replace('.h5', '_augm.h5')
+    t = time.time()
+    filelist = glob.glob('data/val_'+str(shape)+'/data/*')
+    #filelist = filelist[:20]
+    def loadValidationData(fname, img_size):
+    #    print fname
+        fname = fname.split('/')[3]
+        return [np.array(Image.open('data/val_'+str(shape)+'/data/'+fname)).astype(float)/255,
+         np.array(Image.open('data/val_mask_'+str(shape)+'/data/'+fname)).astype(float)]
+    
+    pairs = np.array(Parallel(n_jobs=8)(delayed(loadValidationData)(fname, shape) for fname in filelist))
+    val_car = pairs[:,0,:,:]
+    val_car_mask = pairs[:,1,:,:]
+    val_car = val_car.reshape(val_car.shape[0], shape[0], shape[1], 1)
+    val_car_mask = val_car_mask.reshape(val_car.shape[0], shape[0], shape[1], 1)
+    del pairs
+
+    print "Time elapsed:",  (time.time()-t)/60
+    
+else:
+    print 'Creating validation imageDataGenerators'
+    
+    val_data_gen_args = dict(rescale = 1./255,)
+    
+    val_image_datagen = ImageDataGenerator(**val_data_gen_args)
+    val_mask_datagen = ImageDataGenerator(**val_data_gen_args)
+    
+    # Provide the same seed and keyword arguments to the fit and flow methods
+    seed = 1
+    
+    val_image_generator = val_image_datagen.flow_from_directory(
+        'data/val_'+str(shape)+rgb_suffix,
+        target_size=shape,
+        color_mode = color_mode,
+        class_mode = None,
+        batch_size = batch_size,
+        seed = seed)
+    
+    val_mask_generator = val_mask_datagen.flow_from_directory(
+        'data/val_mask_'+str(shape),
+        target_size=shape,
+        color_mode = 'grayscale',
+        class_mode = None,
+        batch_size = batch_size,
+        seed = seed)
+    
+    # combine generators into one which yields image and masks
+    val_generator = itertools.izip(val_image_generator, val_mask_generator)
+    
 
 
 # %%
@@ -98,14 +213,19 @@ saving_file = saving_file.replace('.h5', '_augm.h5')
 # Load training data with augmentation
 # =============================================================================
 
-#batch_size = 1 ###############
 
 # we create two instances with the same arguments
-data_gen_args = dict(rescale = 1./255,
-#                    shear_range = 0.1,
-                     rotation_range = 4,
-                    zoom_range = 0.03,
-                    horizontal_flip = True)
+if augmentation:
+    print ' - Augmentation'
+    data_gen_args = dict(rescale = 1./255,
+    #                    shear_range = 0.1,
+                         rotation_range = 4,
+                        zoom_range = 0.03,
+                        horizontal_flip = False)        ############# True
+else:
+    print' - No augmentation'
+    data_gen_args = dict(rescale = 1./255,)
+    
 image_datagen = ImageDataGenerator(**data_gen_args)
 mask_datagen = ImageDataGenerator(**data_gen_args)
 
@@ -115,9 +235,9 @@ seed = 1
 #mask_datagen.fit(masks, augment=True, seed=seed)
 
 image_generator = image_datagen.flow_from_directory(
-    'data/train_'+str(shape),
+    'data/train_'+str(shape)+rgb_suffix,
     target_size=shape,
-    color_mode = 'grayscale',
+    color_mode = color_mode,
     class_mode = None,
     batch_size = batch_size,
     seed = seed)
@@ -134,37 +254,47 @@ mask_generator = mask_datagen.flow_from_directory(
 train_generator = itertools.izip(image_generator, mask_generator)
 
 
+
 # %% 
 # =============================================================================
 # Train the model
 # =============================================================================
 
 
-checkpoint = ModelCheckpoint(model_dir + saving_file, monitor='val_dice_coef', verbose=1, save_best_only=True, mode='max')
+checkpoint = ModelCheckpoint(model_dir + saving_file, monitor=monitor, verbose=1, save_best_only=True, mode='max')
+earlyStopping = EarlyStopping(monitor=monitor, min_delta=0.00001, verbose=1, mode='max', patience=9)
+
+
+validation_data = (val_car, val_car_mask) if load_validation_data else val_generator
 
 t = time.time()
-hist = model.fit_generator(
-        generator = train_generator,
-        steps_per_epoch = 3072 // batch_size,
-        epochs = 120,
-        validation_data = (val_car, val_car_mask),
-        callbacks = [earlyStopping, checkpoint],
-        use_multiprocessing = True,
-        verbose = 2)
+if not resume_training:
+    print " * New training"
+    hist = model.fit_generator(
+            generator = train_generator,
+            steps_per_epoch = 3072 // batch_size, #################### 3072
+            epochs = 120,
+            validation_data = validation_data,
+            validation_steps = 1528 // batch_size,
+            callbacks = [earlyStopping, checkpoint],
+            use_multiprocessing = True,
+            verbose = 2)
+else:
+    print " * Restore training"
+    hist = model.fit_generator(
+            generator = train_generator,
+            steps_per_epoch = 3072 // batch_size, #################### 3072
+            epochs = 120,
+            validation_data = validation_data,
+            validation_steps = 1528 // batch_size,
+            callbacks = [earlyStopping, checkpoint],
+            use_multiprocessing = True,
+            initial_epoch=initial_epoch,
+            verbose = 2)
 
 training_time = (time.time()-t)/60
 
-#checkpoint = ModelCheckpoint(model_dir + saving_file, monitor='val_dice_coef', verbose=1, save_best_only=True, mode='max')
-#
-#t = time.time()
-#model.fit(train_car, train_car_mask,
-#                epochs = 500,
-#                batch_size = batch_size,
-#                shuffle = True,
-#                validation_data = (val_car, val_car_mask),
-#                callbacks = [earlyStopping, checkpoint],
-#                verbose = 2)
-#training_time = (time.time()-t)/60
+print 'Training ended'
 
 
 # %% 
@@ -179,19 +309,9 @@ with open(model_dir+'hist.pickle', 'r') as f:
 
 # %%
     
-plt.figure()
-plt.plot(history['loss'], label='loss')
-plt.plot(history['val_loss'], label='val_loss')
-plt.ylim([0,0.5])
-plt.legend(loc=5)
-
-plt.figure()
-plt.plot(history['dice_coef'], label='dice_coef')
-plt.plot(history['val_dice_coef'], label='val_dice_coef')
-plt.ylim([0.75,1])
-plt.legend(loc=5)
-
-# %%
+# =============================================================================
+# Remove worst models and load the best
+# =============================================================================
 
 training_time = (time.time()-t)/60
 best_name, best_loss, model_dir = nn_utils.removeWorstModels(model_dir, rename_dir=True)
@@ -208,61 +328,109 @@ model.load_weights(model_dir + best_name)
 for prefix in ['']:     # , 'ups_' -> not RAM enogh to work
 
     t = time.time()
-#    train_preds = model.predict(train_car)
-    val_preds = model.predict(val_car, batch_size)
-#    val_preds = np.array([])
-#    step = len(val_car)/10
-#    for i in np.arange(0,len(val_car), step):
-#        if len(val_preds) == 0: val_preds = model.predict(val_car[i:i+step], batch_size)
-#        else: val_preds = np.concatenate([val_preds, model.predict(val_car[i:i+step])])
-#        print i,'/',len(val_car)
-    print ' - Elapsed time in predictions:', (time.time()-t)/60
     
-    if prefix == 'ups_':
-        print "Upscaling data"
-#        shape = (train_car.shape[1], train_car.shape[2])
-#        train_preds = np.array([ nn_utils.upsampleArray(arr, shape) for arr in train_preds ])
-        val_preds = np.array([ nn_utils.upsampleArray(arr, shape) for arr in val_preds ])
-#        train_car_mask = np.array([ nn_utils.upsampleArray(arr, shape) for arr in train_car_mask ])
-        val_car_mask = np.array([ nn_utils.upsampleArray(arr, shape) for arr in val_car_mask ])
-
-    base_score = nn_utils.get_best_base_score(np.copy(val_preds), np.copy(val_car_mask))
+    if load_validation_data:
+        val_preds = model.predict(val_car, batch_size)
+        
+        print ' - Elapsed time in predictions:', (time.time()-t)/60
+        
+        if prefix == 'ups_':
+            print "Upscaling data"
+            val_preds = np.array([ nn_utils.upsampleArray(arr, shape) for arr in val_preds ])
+            val_car_mask = np.array([ nn_utils.upsampleArray(arr, shape) for arr in val_car_mask ])
     
-#    train_preds = np.where(train_preds>base_score, 1, 0)
-    val_preds = np.where(val_preds>base_score, 1, 0)
+        base_score = nn_utils.get_best_base_score(np.copy(val_preds), np.copy(val_car_mask))
+        
+    #    val_preds = np.where(val_preds>base_score, 1, 0)
+    #    val_preds = val_preds.astype(float)
+    #    val_car_mask = val_car_mask.astype(float)
     
-#    train_preds = train_preds.astype(float)
-#    train_car_mask = train_car_mask.astype(float)
-    val_preds = val_preds.astype(float)
-    val_car_mask = val_car_mask.astype(float)
-
-    nn_utils.storeTrainStatistics_augm(model_dir, val_car_mask, val_preds, base_score, training_time, prefix=prefix)
+        nn_utils.storeTrainStatistics_augm(model_dir, val_car_mask, val_preds, base_score, training_time, prefix=prefix)
+        
+    else:
+#        base_score = nn_utils.get_best_base_score_generator(val_generator, model, num_steps=1528, batch_size=batch_size)
+        nn_utils.storeTrainStatistics_augm_generator(model_dir, val_generator, model, base_score=0.5, training_time=training_time, prefix=prefix)
+        
     
     print " - Statistics stored"
 
 
 
 # %%
+    
+# =============================================================================
+# Plot story
+# =============================================================================
+
+plt.figure()
+plt.plot(history['loss'], label='loss')
+plt.plot(history['val_loss'], label='val_loss')
+plt.ylim([0,0.5])
+plt.legend(loc=5)
+plt.savefig(model_dir+'loss.png')
+
+plt.figure()
+plt.plot(history['dice_coef'], label='dice_coef')
+plt.plot(history['val_dice_coef'], label='val_dice_coef')
+plt.ylim([0.75,1])
+plt.legend(loc=5)
+plt.savefig(model_dir+'dice_coef.png')
+
+# %%
 # =============================================================================
 # Predictions
 # =============================================================================
 
-i = np.random.randint(0, len(val_car))
+if load_validation_data:
+    i = np.random.randint(0, len(val_car))
+    
+    plt.figure()
+    plt.imshow(val_car[i].reshape(val_car.shape[1], val_car.shape[2]))
+    plt.figure()
+    plt.imshow(val_car_mask[i].reshape(val_car_mask.shape[1], val_car_mask.shape[2]))
+    plt.figure()
+    #plt.imshow(val_preds[i].reshape(val_car.shape[1], val_car.shape[2]))
+    plt.imshow(np.where(model.predict(np.array([val_car[i]]))>base_score, 1, 0).reshape(val_car.shape[1], val_car.shape[2]))
 
-plt.figure()
-plt.imshow(val_car[i].reshape(val_car.shape[1], val_car.shape[2]))
-plt.figure()
-plt.imshow(val_car_mask[i].reshape(val_car_mask.shape[1], val_car_mask.shape[2]))
-plt.figure()
-#plt.imshow(val_preds[i].reshape(val_car.shape[1], val_car.shape[2]))
-plt.imshow(np.where(model.predict(np.array([val_car[i]]))>base_score, 1, 0).reshape(val_car.shape[1], val_car.shape[2]))
-
+else:
+    imgs = val_generator.next()
+    
+    plt.figure()
+    plt.imshow(imgs[0][0].reshape(imgs[0].shape[1], imgs[0].shape[2], num_channels))
+    plt.title('Original')
+    plt.figure()
+    plt.imshow(imgs[1][0].reshape(imgs[1].shape[1], imgs[1].shape[2]))
+    plt.title('Original mask')
+    plt.figure()
+    plt.imshow(model.predict(np.array([imgs[0][0]])).reshape(imgs[0].shape[1], imgs[0].shape[2]))
+    plt.title('Predicted mask')
+    plt.figure()
+    plt.imshow(np.where(model.predict(np.array([imgs[0][0]]))>base_score, 1, 0).reshape(imgs[0].shape[1], imgs[0].shape[2]))
+    plt.title('Final mask')
 
 
 # %%
-#import os
-#print "Suspending..."
-#time.sleep(15)
-#os.system('systemctl suspend') 
+    
+res = []
+for i in np.arange(100):
+    imgs = val_generator.next()
+    res += model.predict(np.array([imgs[0][0]])).ravel().tolist()
+    
+l_1 = len(res)
+res = [ r for r in res if r > 0.05 and r < 0.95 ]
+l_2 = len(res)
+print l_1, l_2, float(l_2)/l_1 
+
+plt.hist(res)
+
+# %%
+
+if False:
+# %%
+    import os
+    import time
+    print "Suspending..."
+    time.sleep(60*60*14)
+    os.system('systemctl suspend') 
 
 
