@@ -9,7 +9,7 @@ from keras.models import Model
 def autoencoder(input_shape=(200,300,1)):
     # %%
     
-    saving_file = "autoencoder_*{val_dice_coef:.4f}*_" + str(input_shape) + '.h5'
+    saving_file = "autoencoder_e{epoch:02d}_*{val_dice_coef:.4f}*_" + str(input_shape) + '.h5'
             
     input_img = Input(shape=input_shape)  
 
@@ -46,7 +46,7 @@ def autoencoder(input_shape=(200,300,1)):
 
 def autoencoder_v2(input_shape=(200,300,1)):
     # %%
-    saving_file = "autoencoder_2_*{val_dice_coef:.4f}*_" + str(input_shape) + '.h5'
+    saving_file = "autoencoder_2_e{epoch:02d}_*{val_dice_coef:.4f}*_" + str(input_shape) + '.h5'
 
     input_img = Input(shape=input_shape)  
 
@@ -86,7 +86,7 @@ def autoencoder_v2(input_shape=(200,300,1)):
 #    https://github.com/fchollet/keras/issues/2994
 def u_net(input_shape=(200,300,1)):
     # %%
-    saving_file = "u-net_*{val_dice_coef:.4f}*_" + str(input_shape) + '.h5'
+    saving_file = "u-net_e{epoch:02d}_*{val_dice_coef:.4f}*_" + str(input_shape) + '.h5'
 
     input_img = Input(input_shape)
     
@@ -136,9 +136,9 @@ def u_net(input_shape=(200,300,1)):
     return Model(input_img, conv10), saving_file
 
 
-def u_net_v2(input_shape=(200,300,1), norm=True, simple=False):
+def u_net_v2(input_shape=(200,300,1), loss='val_dice_coef', norm=True, simple=False, monitor='val_dice_coef'):
     # %%
-    saving_file = "u-net_v2_*{val_dice_coef:.4f}*_" + str(input_shape)
+    saving_file = "u-net_v2_"+loss+"_e{epoch:02d}_*{"+monitor+":.5f}*_" + str(input_shape)
     if norm: saving_file += '_norm'
     if simple: saving_file += '_simpl'
     saving_file += '.h5'

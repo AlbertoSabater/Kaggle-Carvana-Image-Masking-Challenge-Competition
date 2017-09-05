@@ -12,6 +12,7 @@ import pickle
 from joblib import Parallel, delayed
 import multiprocessing
 from keras import backend as K
+from keras.losses import binary_crossentropy
 import os
 import re
 from sklearn import metrics
@@ -33,8 +34,8 @@ def dice_coef(y_true, y_pred):
     intersection = K.sum(y_true_f * y_pred_f)
     return (2. * intersection + 1.) / (K.sum(y_true_f) + K.sum(y_pred_f) + 1.)
 
-def dice_coef_loss(y_true, y_pred):
-    return -dice_coef(y_true, y_pred)
+#def dice_coef_loss(y_true, y_pred):
+#    return -dice_coef(y_true, y_pred)
 
 
 def diceCoefficient_upsample(y_pred, y, shape):
@@ -49,6 +50,15 @@ def diceCoefficient_upsample(y_pred, y, shape):
     coefs = Parallel(n_jobs=8)(delayed(aux)(y_pred[i], y[i], shape) for i in np.arange(len(y)))
 
     return np.sum(coefs)/len(y)
+
+
+# https://github.com/petrosgk/Kaggle-Carvana-Image-Masking-Challenge/blob/master/model/losses.py
+def dice_loss(y_true, y_pred):
+    loss = 1 - dice_coef(y_true, y_pred)
+    return loss
+
+def bce_dice_loss(y_true, y_pred):
+    return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
     
 
 
@@ -92,12 +102,94 @@ def get_best_base_score(preds, y):
     return best_base_score
 
 
+def get_best_base_score_generator(generator, model, num_steps, batch_size):
+    best_base_score = 0
+    best_score = 0
+ 
+#    batch_size = generator.next()[0].shape[0]
+#    num_steps = 1550//batch_size
+
+    for base_score in np.arange(0.25, 0.85, 0.05):
+        score = 0.0
+        
+        print base_score
+        
+        for i in np.arange(num_steps):
+            aux = generator.next()
+            y_pred = model.predict(aux[0], batch_size)
+            y = aux[1]
+            
+            y_pred[y_pred<=base_score] = 0
+            y_pred[y_pred>base_score] = 1
+            score = diceCoefficient(y_pred, y)
+                
+            score += diceCoefficient(y_pred, y)
+            
+        score /= num_steps
+                
+        if score > best_score: 
+            best_score = score
+            best_base_score = base_score
+    print "Wave 1 ended", best_base_score, best_score
+        
+    for base_score in np.arange(best_base_score-0.05, best_base_score+0.06, 0.01):
+        score = 0.0
+
+        print base_score
+        
+        for i in np.arange(num_steps):
+            aux = generator.next()
+            y_pred = model.predict(aux[0], batch_size)
+            y = aux[1]
+            
+            y_pred[y_pred<=base_score] = 0
+            y_pred[y_pred>base_score] = 1
+            score = diceCoefficient(y_pred, y)
+                
+            score += diceCoefficient(y_pred, y)
+                
+        best_score /= num_steps
+
+        if score > best_score: 
+            best_score = score
+            best_base_score = base_score
+    print "Wave 2 ended", best_base_score, best_score
+    
+    for base_score in np.arange(best_base_score-0.01, best_base_score+0.01, 0.001):
+        score = 0.0
+
+        print base_score
+        
+        for i in np.arange(num_steps):
+            aux = generator.next()
+            y_pred = model.predict(aux[0], batch_size)
+            y = aux[1]
+            
+            y_pred[y_pred<=base_score] = 0
+            y_pred[y_pred>base_score] = 1
+            score = diceCoefficient(y_pred, y)
+                
+            score += diceCoefficient(y_pred, y)
+                
+        best_score /= num_steps
+
+        if score > best_score: 
+            best_score = score
+            best_base_score = base_score
+    print "Wave 3 ended", best_base_score, best_score
+           
+    print 'Best_score:', best_score
+    print 'Best_base_score:', best_base_score
+    
+    return best_base_score
+
+
 def createModelDir():
     files = os.listdir(BASE_DIR)
     dir_name = BASE_DIR + 'model_' + str(len(files)) + '/'
     os.makedirs(dir_name)
     print '\n\n\n#########################################################################'
-    print '###############################  MODEL', len(files), ' ###############################'
+    print '###############################  MODEL', len(files), ' ##############################'
     print '#########################################################################'
     return dir_name
 
@@ -144,9 +236,50 @@ def storeTrainStatistics(model_dir, train_car_mask, train_preds, val_car_mask, v
 def storeTrainStatistics_augm(model_dir, val_car_mask, val_preds, base_score, training_time, prefix=''):
     with open(model_dir + 'results.txt', 'a+') as f:    # a+
         f.write(prefix+'base_score: ' + str(base_score) + '\n')
-        f.write(prefix+'val_acc: ' + str(metrics.accuracy_score(val_car_mask.ravel(), val_preds.ravel())) +'\n')
-        f.write(prefix+'val_dice: ' + str(diceCoefficient(val_preds, val_car_mask)) +'\n')
         f.write('training_time: ' + str(training_time) +'\n')
+        for bs in [0.5, base_score]:
+            
+            vp = np.where(val_preds>bs, 1, 0)
+            vp = vp.astype(float)
+            vcm = val_car_mask.astype(float)
+    
+            f.write(prefix+'val_acc'+str(bs)+': ' + str(metrics.accuracy_score(vcm.ravel(), vp.ravel())) +'\n')
+            f.write(prefix+'val_dice'+str(bs)+': ' + str(diceCoefficient(vp, vcm)) +'\n')
+    f.close()
+    
+def storeTrainStatistics_augm_generator(model_dir, generator, model, base_score, training_time, prefix):
+    with open(model_dir + 'results.txt', 'a+') as f:    # a+
+        f.write(prefix+'base_score: ' + str(base_score) + '\n')
+        f.write('training_time: ' + str(training_time) +'\n')
+        
+        bs_iter = [0.5] if base_score==0.5 else [0.5, base_score]
+        for bs in bs_iter:
+            
+            val_acc = 0.0
+            val_dice = 0.0
+            
+            batch_size = generator.next()[0].shape[0]
+            num_steps = 1550//batch_size
+            
+            for i in np.arange(num_steps):
+                aux = generator.next()
+                val_preds = model.predict(aux[0], batch_size)
+                val_car_mask = aux[1]
+            
+                vp = np.where(val_preds>bs, 1, 0)
+                vp = vp.astype(float)
+                vcm = val_car_mask.astype(float)
+                
+                val_acc += metrics.accuracy_score(vcm.ravel(), vp.ravel())
+                val_dice += diceCoefficient(vp, vcm)
+            
+            print 'Results:', val_acc, val_dice
+            val_acc /= num_steps
+            val_dice /= num_steps
+            print 'Results:', val_acc, val_dice
+    
+            f.write(prefix+'val_acc'+str(bs)+': ' + str(val_acc) +'\n')
+            f.write(prefix+'val_dice'+str(bs)+': ' + str(val_dice) +'\n')
     f.close()
     
     
@@ -232,42 +365,65 @@ def preprocessData_v2(img_size):
 # %%
         
 # Preprocess images and mask and stores each image/mask in a folder, different for image/mask and train/val/test
-def preprocessData_v3(img_size):
+def preprocessData_v3(img_size, RGB):
 # %%
-    filelist = glob.glob('data/train/*')
-    filelist_train = filelist[:int(len(filelist)*0.7)]
-    filelist_val = filelist[int(len(filelist)*0.7):]
     
-    def processImageBN(fname, store_dir, source):
+    train_perc = 0.7
+    
+    filelist = glob.glob('data/train/*')
+    filelist_train = filelist[:int(len(filelist)*train_perc)]
+    filelist_val = filelist[int(len(filelist)*train_perc):]
+    
+    def processImageBN(fname, store_dir, store_dir_full, source):
         fname = fname.split('/')[2].split('.')[0]
-        Image.open(source+fname+'.jpg').resize(img_size, Image.ANTIALIAS).convert('L').save(store_dir+fname+'.png')
-        
-    def processImageBN_mask(fname, store_dir):
+        img = Image.open(source+fname+'.jpg').resize(img_size, Image.ANTIALIAS).convert('L')
+        img.save(store_dir+fname+'.png')
+        if store_dir_full: img.save(store_dir_full+fname+'.png')
+    
+    def processImageRGB(fname, store_dir, store_dir_full, source):
         fname = fname.split('/')[2].split('.')[0]
-        Image.open('data/train_masks/'+fname+'_mask.gif').resize(img_size, Image.ANTIALIAS).save(store_dir+fname+'.png')
+        img = Image.open(source+fname+'.jpg').resize(img_size, Image.ANTIALIAS)
+        img.save(store_dir+fname+'.png')
+        if store_dir_full: img.save(store_dir_full+fname+'.png')
+
+    def processImageBN_mask(fname, store_dir_full, store_dir):
+        fname = fname.split('/')[2].split('.')[0]
+        img = Image.open('data/train_masks/'+fname+'_mask.gif').resize(img_size, Image.ANTIALIAS)
+        img.save(store_dir+fname+'.png')
+        if store_dir_full: img.save(store_dir_full+fname+'.png')
         
+    
+    data_func = processImageRGB if RGB else processImageBN
+    rgb_sufix = '_RGB' if RGB else ''
     
     # Get taining data
     t = time.time()
-    store_dir = 'data/train_'+str(img_size)+'/data/'
+    store_dir = 'data/train_'+str(img_size)+rgb_sufix+'/data/'
+    store_dir_full = 'data/full_'+str(img_size)+rgb_sufix+'/data/'
     if not os.path.exists(store_dir): os.makedirs(store_dir)
-    Parallel(n_jobs=8)(delayed(processImageBN)(fname, store_dir, 'data/train/') for fname in filelist_train)
+    if not os.path.exists(store_dir_full): os.makedirs(store_dir_full)
+    Parallel(n_jobs=8)(delayed(data_func)(fname, store_dir, store_dir_full, 'data/train/') for fname in filelist_train)
     
     store_dir = 'data/train_mask_'+str(img_size)+'/data/'
+    store_dir_full = 'data/full_mask_'+str(img_size)+'/data/'
     if not os.path.exists(store_dir): os.makedirs(store_dir)
-    Parallel(n_jobs=8)(delayed(processImageBN_mask)(fname, store_dir) for fname in filelist_train)
+    if not os.path.exists(store_dir_full): os.makedirs(store_dir_full)
+    Parallel(n_jobs=8)(delayed(processImageBN_mask)(fname, store_dir, store_dir_full) for fname in filelist_train)
     print "Train. Time elapsed:",  (time.time()-t)/60
     
 
     # Get validation data
     t = time.time()
-    store_dir = 'data/val_'+str(img_size)+'/data/'
+    store_dir = 'data/val_'+str(img_size)+rgb_sufix+'/data/'
+    store_dir_full = 'data/full_'+str(img_size)+rgb_sufix+'/data/'
     if not os.path.exists(store_dir): os.makedirs(store_dir)
-    Parallel(n_jobs=8)(delayed(processImageBN)(fname, store_dir, 'data/train/') for fname in filelist_val)
+    if not os.path.exists(store_dir_full): os.makedirs(store_dir)
+    Parallel(n_jobs=8)(delayed(data_func)(fname, store_dir, store_dir_full, 'data/train/') for fname in filelist_val)
     
     store_dir = 'data/val_mask_'+str(img_size)+'/data/'
+    store_dir_full = 'data/full_mask_'+str(img_size)+'/data/'
     if not os.path.exists(store_dir): os.makedirs(store_dir)
-    Parallel(n_jobs=8)(delayed(processImageBN_mask)(fname, store_dir) for fname in filelist_val)
+    Parallel(n_jobs=8)(delayed(processImageBN_mask)(fname, store_dir, store_dir_full) for fname in filelist_val)
     print "Validation. Time elapsed:",  (time.time()-t)/60
     
     
@@ -275,13 +431,14 @@ def preprocessData_v3(img_size):
     t = time.time()
     print "Processing Test..."
     filelist = glob.glob('data/test/*')
-    store_dir = 'data/test_'+str(img_size)+'/data/'
+    store_dir = 'data/test_'+str(img_size)+rgb_sufix+'/data/'
     if not os.path.exists(store_dir): os.makedirs(store_dir)
     step = len(filelist)/10
     for i in np.arange(0,len(filelist), step):
         st = time.time()
-        Parallel(n_jobs=8)(delayed(processImageBN)(fname, store_dir, 'data/test/') for fname in filelist[i:i+step])
-        print i,'/', 10, '\t', time.strftime("%H:%M:%S"), '-', (time.time()-st)
+        Parallel(n_jobs=8)(delayed(data_func)(fname, store_dir, None, 'data/test/') for fname in filelist[i:i+step])
+#        print i,'/', 10, '\t', time.strftime("%H:%M:%S"), '-', (time.time()-st)
+        print '{0}/{1}\t{2} - {3:.2f}'.format(i, 10, time.strftime("%H:%M:%S"), (time.time()-st))
     print "Test. Time elapsed:",  (time.time()-t)/60
    
         
