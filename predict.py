@@ -192,11 +192,13 @@ if base_score != 0.5:
     
 # %%
     
-import os
-import time
-print "Shuting down..."
-#time.sleep(60*60*14)
-time.sleep(60)
-#os.system('systemctl suspend') 
-os.system('systemctl shutdown') 
+if False:
+# %%
+    import os
+    import time
+    print "Shuting down..."
+    time.sleep(60*60*17)
+#    time.sleep(60)
+    #os.system('systemctl suspend') 
+    os.system('systemctl shutdown') 
 

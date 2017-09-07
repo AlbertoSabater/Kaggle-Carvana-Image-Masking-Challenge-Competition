@@ -136,9 +136,11 @@ def u_net(input_shape=(200,300,1)):
     return Model(input_img, conv10), saving_file
 
 
-def u_net_v2(input_shape=(200,300,1), loss='val_dice_coef', norm=True, simple=False, monitor='val_dice_coef'):
+def u_net_v2(input_shape=(200,300,1), loss='val_dice_coef', norm=True, simple=False, monitor=['val_dice_coef']):
     # %%
-    saving_file = "u-net_v2_"+loss+"_e{epoch:02d}_*{"+monitor+":.5f}*_" + str(input_shape)
+    saving_file = "u-net_v2_"+loss+"_e{epoch:02d}_mm_" + str(input_shape)
+    saving_file = saving_file.replace('mm', '_'.join(['*{'+m+':.5f}*' for m in monitor]))
+    
     if norm: saving_file += '_norm'
     if simple: saving_file += '_simpl'
     saving_file += '.h5'
