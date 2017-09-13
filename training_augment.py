@@ -29,9 +29,10 @@ BASE_DIR = 'models/'
 shape, batch_size = (256,256), 16
 shape, batch_size = (512,512), 4
 shape, batch_size = (512+256,512+256), 2
-shape = (1024,1024)
+shape, batch_size = (1024,1024), 1
 
-shape, batch_size = (512+256,512+256), 2
+#shape, batch_size = (512+256,512+256), 2
+shape, batch_size = (1024,1024), 1
 
 base_score = 0.5
 augmentation = True
@@ -49,19 +50,21 @@ loss = 'bcedice'        # 'bce'
 #monitor = ['val_dice_coef']
 
 
-resume_training, model_to_resume = False, 15
+resume_training, model_to_resume = True, 15
 
 
 full = True
 train_prefix = 'full_' if full else 'train_'
-monitor = ['dice_coef', 'loss'] if full else ['val_dice_coef']
+monitor = ['val_dice_coef', 'val_loss'] if full else ['val_dice_coef']
 
 
 data_gen_args_train = dict(rescale = 1./255,
-#                    shear_range = 0.1,
-                     rotation_range = 4,
-                    zoom_range = 0.03,
-                    horizontal_flip = True)        ############# True
+                     shear_range = 0.08,
+                     rotation_range = 5,
+                     width_shift_range = 0.08,
+                     height_shift_range = 0.08,
+                    horizontal_flip = True
+                    )
 
 t = time.time()
 
@@ -73,11 +76,10 @@ t = time.time()
 # -- 3.1. Loss -> binary + dice. Entrenar 512x512 con image augmentation (con horizontal_flip)
 # -- 4.1 756x756 + augmenting + flip_horizontal + bcedice  | 2800
 # -- 4.2 756X756. RGB. Augmented, flip_horizontal, bcedice     | 3000
+# -- 5. 768x768, FULL RGB, Agmented | 4000?
 # Entrenar con train+validation
 # 3.2. Loss -> dice
 # 4. Probar cuál es el input más grande posible
-# 5. Optimizar el image augmentation
-# 6. Input en RGB
 # 6. Ver que algoritmo de entrenamiento funciona mejor Adam vs. RMSProp
 # 6. Optimizar learning rate
 # Upsample prediction in NN and test with full image
@@ -153,7 +155,7 @@ else:
     if 'full' in model_name:
         full = True
         train_prefix = 'full_' if full else 'train_'
-        monitor = ['dice_coef', 'loss'] if full else ['val_dice_coef']
+        monitor = ['dice_coef', 'loss', 'val_dice_coef', 'val_loss'] if full else ['val_dice_coef']
         
     
     initial_epoch = int(re.match(r'.*_e([0-9]+).*', model_name).group(1))
@@ -170,6 +172,7 @@ else:
     saving_file = model_name
 
     print model.summary()
+    print 'Model loaded:', model_name
     print ' - Saving file:', saving_file
 
 
@@ -179,60 +182,61 @@ else:
 # Load validation data
 # =============================================================================
 
-if not full:
-    if load_validation_data:
-        print 'Loading validation data'
-        
-        t = time.time()
-        filelist = glob.glob('data/val_'+str(shape)+'/data/*')
-        #filelist = filelist[:20]
-        def loadValidationData(fname, img_size):
-        #    print fname
-            fname = fname.split('/')[3]
-            return [np.array(Image.open('data/val_'+str(shape)+'/data/'+fname)).astype(float)/255,
-             np.array(Image.open('data/val_mask_'+str(shape)+'/data/'+fname)).astype(float)]
-        
-        pairs = np.array(Parallel(n_jobs=8)(delayed(loadValidationData)(fname, shape) for fname in filelist))
-        val_car = pairs[:,0,:,:]
-        val_car_mask = pairs[:,1,:,:]
-        val_car = val_car.reshape(val_car.shape[0], shape[0], shape[1], 1)
-        val_car_mask = val_car_mask.reshape(val_car.shape[0], shape[0], shape[1], 1)
-        del pairs
+if load_validation_data:
+    print 'Loading validation data'
     
-        print "Time elapsed:",  (time.time()-t)/60
-        
-    else:
-        print 'Creating validation imageDataGenerators'
-        
-        val_data_gen_args = dict(rescale = 1./255,)
-        
-        val_image_datagen = ImageDataGenerator(**val_data_gen_args)
-        val_mask_datagen = ImageDataGenerator(**val_data_gen_args)
-        
-        # Provide the same seed and keyword arguments to the fit and flow methods
-        seed = 1
-        
-        val_image_generator = val_image_datagen.flow_from_directory(
-            'data/val_'+str(shape)+rgb_suffix,
-            target_size=shape,
-            color_mode = color_mode,
-            class_mode = None,
-            batch_size = batch_size,
-            seed = seed)
-        
-        val_mask_generator = val_mask_datagen.flow_from_directory(
-            'data/val_mask_'+str(shape),
-            target_size=shape,
-            color_mode = 'grayscale',
-            class_mode = None,
-            batch_size = batch_size,
-            seed = seed)
-        
-        # combine generators into one which yields image and masks
-        val_generator = itertools.izip(val_image_generator, val_mask_generator)
+    t = time.time()
+    filelist = glob.glob('data/val_'+str(shape)+'/data/*')
+    #filelist = filelist[:20]
+    def loadValidationData(fname, img_size):
+    #    print fname
+        fname = fname.split('/')[3]
+        return [np.array(Image.open('data/val_'+str(shape)+'/data/'+fname)).astype(float)/255,
+         np.array(Image.open('data/val_mask_'+str(shape)+'/data/'+fname)).astype(float)]
+    
+    pairs = np.array(Parallel(n_jobs=8)(delayed(loadValidationData)(fname, shape) for fname in filelist))
+    val_car = pairs[:,0,:,:]
+    val_car_mask = pairs[:,1,:,:]
+    val_car = val_car.reshape(val_car.shape[0], shape[0], shape[1], 1)
+    val_car_mask = val_car_mask.reshape(val_car.shape[0], shape[0], shape[1], 1)
+    del pairs
+
+    print "Time elapsed:",  (time.time()-t)/60
+    
 else:
-    val_generator = None
+    print 'Creating validation imageDataGenerators'
     
+    val_data_gen_args = dict(rescale = 1./255)
+    
+    val_image_datagen = ImageDataGenerator(**val_data_gen_args)
+    val_mask_datagen = ImageDataGenerator(**val_data_gen_args)
+    
+    val_dir = 'data/full_' if full else 'data/val_'
+    val_dir += str(shape)+rgb_suffix
+    
+    # Provide the same seed and keyword arguments to the fit and flow methods
+    seed = 1
+    
+    val_image_generator = val_image_datagen.flow_from_directory(
+        'data/'+train_prefix+str(shape)+rgb_suffix,
+        target_size=shape,
+        color_mode = color_mode,
+        class_mode = None,
+        batch_size = batch_size,
+        seed = seed)
+    
+    val_mask_generator = val_mask_datagen.flow_from_directory(
+        'data/'+train_prefix+'mask_'+str(shape),
+        target_size=shape,
+        color_mode = 'grayscale',
+        class_mode = None,
+        batch_size = batch_size,
+        seed = seed)
+    
+    # combine generators into one which yields image and masks
+    val_generator = itertools.izip(val_image_generator, val_mask_generator)
+
+    num_samples_val = val_image_generator.n
 
 
 # %%
@@ -274,7 +278,6 @@ mask_generator = mask_datagen.flow_from_directory(
     seed = seed)
 
 num_samples_train = image_generator.n
-num_samples_val= mask_generator.n
 
 # combine generators into one which yields image and masks
 train_generator = itertools.izip(image_generator, mask_generator)
@@ -324,7 +327,7 @@ else:
             validation_steps = num_samples_val // batch_size,
             callbacks = callbacks,
             use_multiprocessing = True,
-            initial_epoch=initial_epoch,
+            initial_epoch=initial_epoch+1,
             verbose = 2)
 
 training_time = (time.time()-t)/60
@@ -387,7 +390,8 @@ for prefix in ['']:     # , 'ups_' -> not RAM enogh to work
         
     else:
 #        base_score = nn_utils.get_best_base_score_generator(val_generator, model, num_steps=1528, batch_size=batch_size)
-        nn_utils.storeTrainStatistics_augm_generator(model_dir, val_generator, model, base_score=0.5, training_time=training_time, prefix=prefix)
+        generator = train_generator if full else val_generator
+        nn_utils.storeTrainStatistics_augm_generator(model_dir, generator, model, base_score=0.5, training_time=training_time, prefix=prefix)
         
     
     print " - Statistics stored"
@@ -431,7 +435,7 @@ if load_validation_data:
     plt.imshow(np.where(model.predict(np.array([val_car[i]]))>base_score, 1, 0).reshape(val_car.shape[1], val_car.shape[2]))
 
 else:
-    imgs = val_generator.next() if not full else train_generator.next()
+    imgs = train_generator.next() # if not full else train_generator.next()
     
     plt.figure()
     plt.imshow(imgs[0][0].reshape(imgs[0].shape[1], imgs[0].shape[2], num_channels))
