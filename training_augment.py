@@ -58,13 +58,19 @@ train_prefix = 'full_' if full else 'train_'
 monitor = ['val_dice_coef', 'val_loss'] if full else ['val_dice_coef']
 
 
+#data_gen_args_train = dict(rescale = 1./255,
+#                     shear_range = 0.08,
+#                     rotation_range = 5,
+#                     width_shift_range = 0.08,
+#                     height_shift_range = 0.08,
+#                    horizontal_flip = True
+#                    )
+
 data_gen_args_train = dict(rescale = 1./255,
-                     shear_range = 0.08,
-                     rotation_range = 5,
-                     width_shift_range = 0.08,
-                     height_shift_range = 0.08,
-                    horizontal_flip = True
-                    )
+                    shear_range = 0.1,
+                    rotation_range = 4,
+                    zoom_range = 0.03,
+                    horizontal_flip = True)    
 
 t = time.time()
 
@@ -162,6 +168,7 @@ else:
     
     model_name = re.sub(r'_e[0-9]+', '_e{epoch:02d}', model_name)
     model_name = re.sub(r'_\*[\.0-9\*_]+\*', '_'+'_'.join(['*{'+m+':.5f}*' for m in monitor]), model_name)
+    shape = tuple([ int(i) for i in re.split(r'\(|\)', model_name)[1].split(',')][:-1])
     
     
     model.compile(optimizer='adam', 
@@ -318,7 +325,7 @@ if not resume_training:
             use_multiprocessing = True,
             verbose = 2)
 else:
-    print " * Restore training"
+    print " * Restore training -", model_to_resume
     hist = model.fit_generator(
             generator = train_generator,
             steps_per_epoch = num_samples_train // batch_size, #################### num_samples_train
@@ -353,7 +360,7 @@ with open(model_dir+'hist.pickle', 'r') as f:
 
 training_time = (time.time()-t)/60
 if full:
-    best_name, best_loss, model_dir = nn_utils.removeWorstModelsFull(model_dir, rename_dir=True)
+    best_name, best_loss, model_dir = nn_utils.removeWorstModelsFull_v2(model_dir, rename_dir=True)
 else:
     best_name, best_loss, model_dir = nn_utils.removeWorstModels(model_dir, rename_dir=True)
 
@@ -435,7 +442,7 @@ if load_validation_data:
     plt.imshow(np.where(model.predict(np.array([val_car[i]]))>base_score, 1, 0).reshape(val_car.shape[1], val_car.shape[2]))
 
 else:
-    imgs = train_generator.next() # if not full else train_generator.next()
+    imgs = val_generator.next() # if not full else train_generator.next()
     
     plt.figure()
     plt.imshow(imgs[0][0].reshape(imgs[0].shape[1], imgs[0].shape[2], num_channels))
@@ -449,6 +456,71 @@ else:
     plt.figure()
     plt.imshow(np.where(model.predict(np.array([imgs[0][0]]))>base_score, 1, 0).reshape(imgs[0].shape[1], imgs[0].shape[2]))
     plt.title('Final mask')
+
+
+# %%
+
+base_dir = 'post_images/'+str(shape)+'/'
+
+
+for i in np.arange(2):
+    
+    suffix = 'train/' if i == 0 else 'val/'
+    store_dir = base_dir+suffix
+    if not os.path.exists(store_dir): os.makedirs(store_dir)
+
+#
+#    images_dir = 'data/'+train_prefix+str(shape)+rgb_suffix+'/data/*'
+#    images_dir_mask = 'data/'+train_prefix+'mask_'+str(shape)+'/data/*'
+#
+#    list_imgs = glob.glob(images_dir)
+#    list_imgs_mask = glob.glob(images_dir_mask)
+#    list_imgs.sort()
+#    list_imgs_mask.sort()
+#
+#    i = np.random.randint(0, len(filelist))
+    
+    generator = train_generator if i == 0 else val_generator
+    
+    print '***', suffix
+    
+    for j in np.arange(10):
+        imgs = generator.next() # if not full else train_generator.next()
+        
+#         1. Store original image
+        # 2. Store original image cropped
+#         3. Store original mask
+        # 4. Store original mask cropped
+        # 5. Store prediction
+        # 6. Store prediction mask
+        # Repetir x veces con y sin auagment
+        
+        
+        
+        plt.figure()
+        original_img = imgs[0][0].reshape(imgs[0].shape[1], imgs[0].shape[2], num_channels)
+        plt.imshow(original_img)
+        plt.title('Original')
+        plt.savefig(store_dir+'original_img_'+str(j)+'.png',bbox_inches='tight')
+        
+        plt.figure()
+        original_mask = imgs[1][0].reshape(imgs[1].shape[1], imgs[1].shape[2])
+        plt.imshow(original_mask)
+        plt.title('Original mask')
+        plt.savefig(store_dir+'original_mask_'+str(j)+'.png',bbox_inches='tight')
+
+        plt.figure()
+        predicted_mask = model.predict(np.array([imgs[0][0]])).reshape(imgs[0].shape[1], imgs[0].shape[2])
+        plt.imshow(predicted_mask)
+        plt.title('Predicted mask')
+        plt.savefig(store_dir+'predicted_mask_'+str(j)+'.png',bbox_inches='tight')
+        
+        plt.figure()
+        final_predicted_mask = np.where(model.predict(np.array([imgs[0][0]]))>base_score, 1, 0).reshape(imgs[0].shape[1], imgs[0].shape[2])
+        plt.imshow(final_predicted_mask)
+        plt.title('Final mask')
+        plt.savefig(store_dir+'final_predicted_mask_'+str(j)+'.png',bbox_inches='tight')
+    
 
 
 # %%

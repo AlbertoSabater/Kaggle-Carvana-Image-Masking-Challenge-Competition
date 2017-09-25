@@ -20,7 +20,7 @@ import re
 
 
 base_score = 0.5
-model_number = 13
+model_number = 15
 
 
 # Fast run length encoding
@@ -95,9 +95,15 @@ loaded_model_json = json_file.read()
 json_file.close()
 model = model_from_json(loaded_model_json)
 
-model.load_weights(model_dir+[f for f in os.listdir(model_dir) if f[-3:]=='.h5'][0])
+#model.load_weights(model_dir+[f for f in os.listdir(model_dir) if f[-3:]=='.h5'][0])
+#
+#model_name = [f for f in os.listdir(model_dir) if f[-3:]=='.h5'][0][:-3]
 
-model_name = [f for f in os.listdir(model_dir) if f[-3:]=='.h5'][0][:-3]
+
+model.load_weights(model_dir+[f for f in os.listdir(model_dir) if f[-3:]=='.h5'][-1])
+
+model_name = [f for f in os.listdir(model_dir) if f[-3:]=='.h5'][-1][:-3]
+
 
 print model_name
 

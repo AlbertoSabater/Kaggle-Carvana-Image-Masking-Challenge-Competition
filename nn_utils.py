@@ -273,6 +273,69 @@ def removeWorstModelsFull(model_dir, rename_dir=True):
     return best_name, best_loss, new_model_dir
 
 
+# Iterate over a varible number of metrics. [dice, loss]+
+def removeWorstModelsFull_v2(model_dir, rename_dir=True):
+
+    model_dir = BASE_DIR+[d for d in os.listdir(BASE_DIR) if d.startswith(model_dir.split('/')[1]) ][0] + '/'
+    files = [ f for f in os.listdir(model_dir) if re.findall('.*\.h5', f) ]
+
+    mtr_pattern = r'\*(\d\.[\d]+)\*'
+    num_metrics = len(re.split(mtr_pattern, files[-1])[1::2])
+    
+    
+    best_names = []
+    best_vals = []
+    for i in np.arange(num_metrics):
+        
+        print "***", i
+        
+        # Sie s impar maximizar si no minimizar
+        best_val = float('inf') if i%2 != 0 else 0.0
+        best_file = ''
+        for f in files:
+            mtrs = re.split(mtr_pattern, f)[1::2]
+            if len(mtrs)>i:
+                val = float(mtrs[i])
+                if i%2 != 0:    # minimizar
+                    print 'min', val, best_val
+                    if val < best_val:
+                        best_val = val
+                        best_file = f
+                else:           # Maximizar
+                    print 'max', val, best_val
+                    if val > best_val:
+                        best_val = val
+                        best_file = f 
+                        
+        best_names.append(best_file)
+        best_vals.append(best_val)
+        
+    print list(set(best_names))
+    print best_vals
+            
+    
+    print best_names
+    print best_vals            
+    
+#    print "Best model name:", best_name, "-" , best_loss
+    
+    # Remove bad models
+    for name in files:
+        if not name in best_names:
+            os.remove(model_dir + name)
+            
+    best_dice = best_vals[2] if len(best_vals)>2 else best_vals[0]
+    best_name = best_names[2] if len(best_names)>2 else best_names[0]
+    best_loss = best_vals[3] if len(best_vals)>2 else best_vals[1]
+    
+    if rename_dir:
+        new_model_dir = BASE_DIR+re.findall('(model_[0-9]*)_?', model_dir.split('/')[1])[0]+'_'+str(best_dice) + '/'
+        print model_dir, new_model_dir
+        os.rename(model_dir, new_model_dir)
+
+    return best_name, best_loss, new_model_dir
+
+
 def storeTrainStatistics(model_dir, train_car_mask, train_preds, val_car_mask, val_preds, base_score, training_time, prefix=''):
     with open(model_dir + 'results.txt', 'a+') as f:    # a+
         f.write(prefix+'base_score: ' + str(base_score) + '\n')
